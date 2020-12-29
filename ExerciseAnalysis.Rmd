@@ -1,0 +1,114 @@
+---
+title: "Weight Lifting Exercise Quality Analysis"
+author: "Haijing Wang"
+date: "12/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Background and Summary
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).  
+
+We have performed data partition to split data into training and test partition. As the number of variables are quite large, we exercise feature reduction techniques and finally reduced the number of variables to 9. Based on the 9 variables, we fitted Random Forest model to predict the exercise quality category.
+
+## Load data and exploratory data analysis
+```{r}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", dest="plm-training.csv", method="curl")
+rawdata <- read.csv("plm-training.csv", na.strings = c("#DIV/0!","NA",""))
+dim(rawdata)
+```
+
+## Variable reduction with NA ratio and PCA  
+As there are 160 variables, we need to reduce it in order to fit a model.   
+1. First, we will eliminate service variables which does not contribute to outcome  
+2. Second, we will eliminate columns with a lot of NAs  
+3. Third, we will eliminate variables with almost zero variance  
+4. Fourth, we will make outcome classe into factor  
+
+```{r}
+library(caret)
+
+## First 7 columns are username, time etc. info, irrelevant to outcome.
+othervars <- c(1:7)
+rawdata <- rawdata[, -othervars]
+
+## Survey NA ratio per column
+naratios <- NULL
+for (i in (1:ncol(rawdata))){
+  naratio <-  sum(is.na(rawdata[,i]))/nrow(rawdata)
+  naratios <- c(naratios, naratio)
+} 
+summary(naratios)
+quantile(naratios, c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1))
+## we have decided to exclude all columns with NA ratio > 0.3
+navars <- NULL
+for(i in (1: length(naratios))){
+  if(naratios[i] >= 0.3)
+    navars <- c(navars, names(rawdata)[i])
+}
+rawdata <- rawdata[,!(names(rawdata) %in% navars)]
+## find nearZeroVariance variables
+nearZeroVar(rawdata[, -53], names=TRUE)
+## factorize outcome column
+rawdata$classe <- as.factor(rawdata$classe)
+dim(rawdata)
+```
+
+Now we are down to 52 variables, plus outcome. Still, it would be quite expensive to fit a model with 52 predictors. We will use Primary Component Analysis (PCA) to achieve this.  
+
+```{r}
+set.seed(799)
+inTrain <- createDataPartition(y=rawdata$classe, p=0.7, list=FALSE)
+train <- rawdata[inTrain, ]
+test <- rawdata[-inTrain, ]
+
+## Use PCA model to reduce # of variables further
+pca_model <- prcomp(train[ , -53])
+summary(pca_model)
+## PC1 to PC9 explains 95.14% of variance, we can use these 9
+pca.df <- as.data.frame(pca_model$x[, 1:9])
+pca.df <- cbind(pca.df, train$classe)
+names(pca.df)[10] <- "classe"
+```
+
+## Model fit with Random Forest  
+As our outcome is not numeric, it is very important that we convert it to factor in order to use classification instead of regression in Random Forest algorithm. This has already been done when we explore the data.  
+
+As Random Forest is expensive to run, I explored with different number of trees to compare accuracy and time taken to run. 
+
+```{r}
+library(randomForest)
+## ntree = 10 Accuracy 83%
+rf.10 <- randomForest(x=pca.df[, 1:9], y=pca.df[, 10], ntree=10, mtry=3, proximity=TRUE)
+
+## ntree = 100 Accuracy 93.8%
+rf.100 <- randomForest(x=pca.df[, 1:9], y=pca.df[, 10], ntree=100, mtry=3, proximity=TRUE)
+
+## ntree = 500
+rf.500 <- randomForest(x=pca.df[, 1:9], y=pca.df[, 10], ntree=500, mtry=3, proximity=TRUE)
+confusionMatrix(rf.500$predicted, train$classe)
+
+## rf.1000 <- randomForest(x=pca.df[, 1:9], y=pca.df[, 10], ntree=1000, mtry=3, proximity=TRUE)
+##confusionMatrix(rf.1000$predicted, pca.df$classe)
+```
+
+I also experimented with 1000 trees with marginal improvement in accuracy, but much longer to run. Finally we will settle with 500 tree Random Forest which yields to close to 95% accuracy.  
+
+I also tried Decision Tree, rpart, which did not yield good accuracy. So randomForest is picked over rpart.  
+
+## Model testing
+We will run our model on test data.
+```{r}
+test_pca <- predict(pca_model, test[, -53])
+test.pca.df <- as.data.frame(test_pca[, 1:9])
+test.pca.df <- cbind(test.pca.df, "classe"=test$classe)
+test.rf.500 <- randomForest(x=test.pca.df[, 1:9], y=test.pca.df[,10], ntree=500, mtry=3, proximity=TRUE)
+confusionMatrix(test.rf.500$predicted, test.pca.df$classe)
+```
+
+## Conclusion
+In training data, we got accuracy *94.7%*. Running the model against test data, we got *88.8%*. The accuracy is lower, which makes sense as the model is fitted using train data. This result is not ideal, however, due to my personal PC hardware limit, I can not explore further with other expensive method. If adequate hardware is available, we should definitely aim to improve the accuracy rate to be even higher.  
+
