@@ -1,0 +1,24 @@
+---
+title: "My Map"
+author: "Haijing Wang"
+date: "12/30/2020"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+## My Map of IBM Research
+
+Today's date is `r Sys.Date()`. It is almost year 2021. So Happy New Year to you!  
+
+```{r}
+library(leaflet)
+my_map <- leaflet() %>% 
+  addTiles()  %>% 
+  addMarkers(lat=41.233040, lng=-73.810707, popup='<a href="https://www.research.ibm.com/labs/watson/">IBM T. J. Watson</a>')
+my_map
+```
+
